@@ -1,0 +1,1457 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>NUA 부스 스토리</title>
+
+<!-- iOS: 홈 화면에 추가 → 브라우저 UI 숨김 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NUA">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+<!-- 스토리 이미지 속 글자 교체(patch)용 — 원본 PNG와 같은 폰트 -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700&display=block">
+<!-- 1페이지 정답 'mood' 글씨체 -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=block">
+
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   NUA 부스 스토리 — 단일 파일 버전
+   화면 5개(story / find / compare / mood / event)를 해시 라우팅으로 전환.
+   ─ 원래 파일 대응 ─
+   #view-story   ← index.html + styles/*.css + src/*.js
+   #view-find    ← find/index.html
+   #view-compare ← compare/index.html
+   #view-mood    ← mood/index.html
+   #view-event   ← event/index.html
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 디자인 토큰 (구 styles/tokens.css) ───────────────────────── */
+:root {
+  --labels-primary: rgb(0, 0, 0);
+  --labels-secondary: rgba(60, 60, 67, 0.6);
+  --labels-tertiary: rgba(60, 60, 67, 0.3);
+
+  --fills-tertiary: rgba(118, 118, 128, 0.12);
+  --backgrounds-secondary: rgb(242, 242, 247);
+  --page-bg: #f4f4f4;
+  --separators-non-opaque: rgba(0, 0, 0, 0.12);
+
+  --accents-blue: rgb(0, 136, 255);
+  --accents-orange: rgb(255, 141, 40);
+
+  --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro",
+    "Helvetica Neue", "Apple SD Gothic Neo", "Pretendard", system-ui, sans-serif;
+  --font-kr: 'Pretendard', 'Pretendard Variable', -apple-system, BlinkMacSystemFont,
+    'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --radius-capsule: 500px;
+  --radius-thumb: 6px;
+  --radius-sheet: 34px;
+  --radius-frame: 38px;
+
+  --shadow-sheet: 0 -1px 40px rgba(0, 0, 0, 0.18);
+}
+
+/* ── 전역 ─────────────────────────────────────────────────────── */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-system);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  color: var(--labels-primary);
+}
+img { -webkit-user-drag: none; user-drag: none; }
+
+/* ── 뷰 전환 ──────────────────────────────────────────────────── */
+.view { display: none; }
+
+/* story / find / compare = 스크롤 없는 고정 화면 */
+body[data-view="story"],
+body[data-view="find"],
+body[data-view="compare"] {
+  overflow: hidden;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+body[data-view="story"].is-preview { background: var(--backgrounds-secondary); }
+body[data-view="story"].is-kiosk   { background: #000; }
+body[data-view="find"]    { background: #fff; }
+body[data-view="compare"] { background: #ffffff; }
+body[data-view="mood"]    { background: #e9e9ec; user-select: none; -webkit-user-select: none; }
+body[data-view="event"],
+body[data-view="apply"]   { background: #f3f3f4; }
+
+/* ═══════════════ 1. STORY ═══════════════ */
+#view-story { min-height: 100dvh; }
+body.is-preview #view-story.is-active {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18px; padding: 24px;
+}
+body.is-kiosk #view-story.is-active {
+  display: grid; position: fixed; inset: 0; place-items: center;
+}
+
+.stage-mount { display: contents; }
+
+.stage {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: var(--page-bg);
+  container-type: inline-size;
+  --u: calc(100cqw / 432);
+}
+body.is-preview .stage {
+  width: min(100%, calc((100dvh - 190px) * 0.75));
+  border-radius: var(--radius-frame);
+  box-shadow: var(--shadow-sheet);
+}
+body.is-kiosk .stage {
+  width: min(100vw, calc(100dvh * 3 / 4));
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.layers { position: absolute; inset: 0; z-index: 0; }
+.layer {
+  position: absolute; inset: 0;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity 160ms var(--ease);
+  will-change: opacity;
+}
+.layer__patch { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* 2페이지 아이콘 커졌다작아졌다 (랜덤 팝) */
+.ic-ani { position: absolute; inset: 0; pointer-events: none; }
+.ic-ani__i {
+  position: absolute; transform: translate(-50%, -50%);
+  transform-origin: center center; will-change: transform;
+}
+@keyframes icPop {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(1.28); }
+}
+@media (prefers-reduced-motion: reduce) { .ic-ani__i { animation: none !important; } }
+
+.hotspots { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.hotspot {
+  position: absolute; pointer-events: auto;
+  min-width: calc(var(--u) * 44);
+  min-height: calc(var(--u) * 44);
+  padding: 0; border: 0; background: transparent; cursor: pointer;
+}
+
+.tapzone {
+  position: absolute; top: 0; bottom: 0; z-index: 1;
+  padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer;
+}
+.tapzone--left  { left: 0;  width: 26%; }
+.tapzone--right { right: 0; width: 74%; }
+.tapzone:active:not(:disabled) { background: rgba(0, 0, 0, 0.03); }
+.tapzone:disabled { cursor: default; }
+@media (hover: hover) {
+  body.is-preview .tapzone:hover:not(:disabled) { opacity: 0.7; }
+}
+
+.preview-header { display: flex; align-items: baseline; gap: 10px; justify-content: center; }
+.preview-header__title {
+  font-size: 13px; font-weight: 590; letter-spacing: -0.08px; color: var(--labels-secondary);
+}
+
+/* 스토리 2페이지 버튼 팝업 — compare 의 변우석 사진처럼 어두운 배경 위 카드.
+   카드 크기·위치는 JS(placeCard)가 스토리 화면 기준으로 계산 */
+.ovpop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(17, 17, 17, .72); cursor: pointer;
+}
+.ovpop__card {
+  position: absolute; overflow: hidden; background: #f7f7f7;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .45);
+}
+.ovpop.is-open .ovpop__card { animation: popIn .22s var(--ease); }
+.ovpop__img { display: block; max-width: none; pointer-events: none; }
+.ovpop__close {
+  position: absolute; top: 16px; right: 18px; z-index: 1; width: 46px; height: 46px; border-radius: 50%;
+  border: none; background: rgba(255, 255, 255, .2); color: #fff; font-size: 22px; cursor: pointer;
+  display: grid; place-items: center;
+}
+
+.error { color: var(--labels-secondary); text-align: center; padding: 40px; line-height: 1.5; }
+
+/* ═══════════════ 2. FIND (find your best style) ═══════════════ */
+#view-find.is-active { display: block; }
+#view-find {
+  --ink: #111111;
+  --orange: #ff5a1f;
+  --tab-active: #333333;
+  --line: #111111;
+  font-family: var(--font-kr);
+  color: var(--ink);
+  line-height: 1.5;
+}
+#view-find img { display: block; max-width: 100%; }
+#view-find .wrap {
+  max-width: 820px; margin: 0 auto; padding: 20px 24px; position: relative;
+  height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+}
+#view-find .back, #view-event .back, #view-apply .back {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; margin: 0 0 8px -8px; border-radius: 50%;
+  text-decoration: none; transition: background 120ms var(--ease);
+  border: 0; background: transparent; cursor: pointer; padding: 0;
+}
+#view-find .back:hover, #view-event .back:hover, #view-apply .back:hover { background: rgba(0, 0, 0, .05); }
+
+#view-find .headline {
+  font-size: 40px; line-height: 1.08; font-weight: 800;
+  letter-spacing: -1px; margin: 2px 0 18px;
+}
+#view-find .headline .best { color: var(--orange); }
+
+#view-find .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; flex: none; }
+#view-find .tab {
+  padding: 15px 0; border: 1.5px solid var(--ink); background: #fff; border-radius: 6px;
+  font-family: var(--font-kr); font-size: 19px; font-weight: 700; color: var(--ink); cursor: pointer;
+  transition: background 140ms var(--ease), color 140ms var(--ease);
+}
+#view-find .tab.active { background: var(--tab-active); color: #fff; border-color: var(--tab-active); }
+
+#view-find .grid {
+  flex: 1 1 auto; min-height: 0; display: grid;
+  grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); gap: 16px;
+}
+#view-find .cell {
+  cursor: zoom-in; border: 1.5px solid var(--line); border-radius: 4px; overflow: hidden;
+  background: #fff; min-height: 0; transition: transform .14s var(--ease);
+}
+#view-find .cell:active { transform: scale(.97); }
+#view-find .cell img {
+  width: 100%; height: 100%; object-fit: cover; object-position: top center; pointer-events: none;
+}
+/* 인물 위치 맞춤(PEOPLE_BOX) — 높이·위치는 JS가 사진마다 계산해 인라인으로 넣음 */
+#view-find .cell { position: relative; }
+#view-find .cell img.framed { position: absolute; left: 50%; width: auto; max-width: none; object-fit: fill; }
+
+/* 확대 뷰어 */
+#view-find .zoom { position: fixed; inset: 0; background: rgba(17,17,17,.95); display: none; z-index: 70; touch-action: none; }
+#view-find .zoom.show { display: block; }
+#view-find .zoom-stage { position: absolute; inset: 0; overflow: hidden; }
+#view-find .zoom-card {
+  position: absolute; top: 50%; left: 50%; transform-origin: center center; will-change: transform;
+  background: #fff; border-radius: 6px; overflow: hidden;
+}
+#view-find .zoom-card img {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; max-width: none; user-select: none;
+}
+/* ZOOM_FRAME 사진: 높이·위치·가로 가운데 이동은 JS가 인라인으로 넣음 */
+#view-find .zoom-card img.framed { left: 50%; width: auto; }
+#view-find .zoom-close {
+  position: absolute; top: 14px; right: 16px; z-index: 2; background: rgba(255,255,255,.16);
+  border: none; color: #fff; width: 46px; height: 46px; border-radius: 50%; font-size: 22px; cursor: pointer;
+}
+#view-find .zoom-count {
+  position: absolute; top: 20px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,.85);
+  font-size: 14px; font-weight: 600; letter-spacing: .04em; z-index: 2; font-variant-numeric: tabular-nums;
+}
+#view-find .zoom-hint {
+  position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,255,255,.7); font-size: 12px; letter-spacing: .04em; z-index: 2;
+}
+#view-find .pv-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; background: rgba(255,255,255,.16);
+  border: none; color: #fff; width: 48px; height: 48px; border-radius: 50%; font-size: 26px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+#view-find .pv-prev { left: 14px; }
+#view-find .pv-next { right: 14px; }
+
+/* ═══════════════ 3. COMPARE (추구미 vs 도달가능미) ═══════════════ */
+#view-compare.is-active {
+  display: flex; align-items: center; justify-content: center;
+  height: 100dvh; overflow: hidden;
+}
+#view-compare { font-family: var(--font-kr); }
+/* 제목 + 사진 두 줄을 흰 상자 하나에 담음.
+   원본(1500×2000)에서 [285, 428, 930, 1140] 영역만 잘라 씀 */
+#view-compare .cbox {
+  flex: none; width: min(80vw, 68dvh); padding: 16px;
+  background: #fff; border-radius: 26px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.05), 0 14px 36px rgba(0,0,0,.12);
+}
+#view-compare .ccut { overflow: hidden; aspect-ratio: 930 / 1140; }
+#view-compare .compare {
+  display: block; max-width: none;
+  width: 161.29%; margin-left: -30.65%; margin-top: -46.02%;
+}
+#view-compare .zone {
+  position: fixed; top: 0; bottom: 0; z-index: 10;
+  border: none; background: transparent; padding: 0; margin: 0; cursor: pointer;
+}
+#view-compare .zone-prev { left: 0; width: 25%; }
+#view-compare .zone-center { left: 25%; width: 50%; }
+#view-compare .zone-next { right: 0; width: 25%; }
+
+#view-compare .pop {
+  position: fixed; inset: 0; z-index: 50; display: none;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(17,17,17,.72); cursor: pointer;
+}
+#view-compare .pop.show { display: flex; }
+#view-compare .pop-img {
+  max-width: 94vw; max-height: 82dvh; width: auto; height: auto;
+  border-radius: 12px; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.45);
+}
+#view-compare .pop.show .pop-img { animation: popIn .22s var(--ease); }
+@keyframes popIn { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+#view-compare .pop-close {
+  position: absolute; top: 16px; right: 18px; width: 46px; height: 46px; border-radius: 50%;
+  border: none; background: rgba(255,255,255,.2); color: #fff; font-size: 22px; cursor: pointer;
+  display: grid; place-items: center;
+}
+@media (prefers-reduced-motion: reduce) { #view-compare .pop.show .pop-img { animation: none; } }
+
+/* ═══════════════ 4. MOOD ═══════════════ */
+#view-mood.is-active { display: block; }
+#view-mood { font-family: var(--font-kr); }
+#view-mood .stack {
+  max-width: 900px; margin: 0 auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+/* 구획 카드 — 원본 이미지에서 필요한 부분만 잘라 둥근 사각형에 담음 */
+#view-mood .mcard {
+  position: relative; overflow: hidden; border-radius: 24px; background: #f6f6f6;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 10px 28px rgba(0,0,0,.07);
+}
+#view-mood .mcard img { display: block; width: 100%; height: auto; }
+#view-mood .mcrop { overflow: hidden; }
+/* 단계 표시 — 카드 맨 위 흰 띠 */
+#view-mood .mhead {
+  display: flex; align-items: center; gap: 8px; padding: 11px 16px; background: #fff;
+  font-family: var(--font-kr); font-size: 13px; font-weight: 800; letter-spacing: .1em; color: #6b6b70;
+}
+#view-mood .mhead i { flex: 1; height: 1px; background: #e3e3e6; }
+
+/* ═══════════════ 5. EVENT (이벤트 안내) · 6. APPLY (신청 폼) ═══════════════ */
+#view-event.is-active,
+#view-apply.is-active {
+  display: flex; justify-content: center; min-height: 100dvh; padding: 32px 20px 140px;
+}
+#view-event, #view-apply {
+  --card: #ffffff;
+  --ink: #141414;
+  --ink-soft: #2a2a2a;
+  --label: #8a8a8e;
+  --line: #e6e6e8;
+  --strike: #2e6ff2;
+  --free-bg: #141414;
+  --free-ink: #ffffff;
+  font-family: var(--font-kr);
+  color: var(--ink);
+  width: 100%;
+}
+#view-event .page, #view-apply .page { width: 100%; max-width: 520px; margin: auto 0; }
+#view-event .headline {
+  font-size: 44px; line-height: 1.16; font-weight: 800; letter-spacing: -1.2px; margin: 4px 0 28px;
+}
+#view-event .card {
+  background: var(--card); border-radius: 22px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.06);
+}
+#view-event .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: var(--card); }
+#view-event .hero img { display: block; width: 100%; height: 200px; object-fit: cover; }
+#view-event .panel { padding: 14px 22px 16px; }
+#view-event .eyebrow {
+  font-size: 13px; font-weight: 600; letter-spacing: 1.5px; color: var(--label); margin: 0 0 16px;
+}
+#view-event .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+#view-event .list li { display: flex; align-items: center; gap: 12px; font-size: 17px; font-weight: 600; color: var(--ink-soft); }
+#view-event .check { flex: none; width: 22px; height: 22px; }
+#view-event .check svg { display: block; width: 100%; height: 100%; }
+#view-event .divider { height: 1px; background: var(--line); margin: 18px 0 14px; }
+#view-event .price { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+#view-event .price .label { font-size: 15px; font-weight: 600; color: var(--label); }
+#view-event .price .original { position: relative; font-size: 26px; font-weight: 700; color: var(--ink); }
+#view-event .price .original::after {
+  content: ""; position: absolute; left: -2px; right: -2px; top: 52%; height: 2.5px;
+  background: var(--strike); transform: rotate(-8deg); border-radius: 2px;
+}
+#view-event .price .arrow { font-size: 22px; font-weight: 800; color: var(--ink); }
+#view-event .free {
+  display: inline-flex; align-items: center; background: var(--free-bg); color: var(--free-ink);
+  font-size: 20px; font-weight: 800; letter-spacing: .5px; padding: 8px 20px; border-radius: 999px;
+}
+#view-event .cta {
+  display: block; width: 100%; margin: 12px 0 0;
+  background: var(--card); color: var(--ink); border: 1.5px solid var(--ink); border-radius: 12px;
+  padding: 16px 28px; font-family: var(--font-kr); font-size: 17px; font-weight: 700; letter-spacing: -.2px;
+  cursor: pointer; transition: opacity 120ms var(--ease);
+}
+#view-event .cta:hover { opacity: .65; }
+#view-event .cta:active { opacity: .5; }
+
+/* 신청 폼 페이지 (#/apply) */
+#view-apply .form-card {
+  margin-top: 14px; background: var(--card); border-radius: 22px; padding: 28px 22px 26px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.06);
+}
+#view-apply .form-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+#view-apply .form-card h2 { font-size: 24px; font-weight: 800; letter-spacing: -.6px; margin: 0 0 6px; }
+#view-apply .extra-toggle {
+  flex: none; width: 36px; height: 36px; padding: 0; display: grid; place-items: center;
+  font-size: 20px; line-height: 1; border: 1.5px solid var(--line); border-radius: 10px;
+  background: #fff; color: var(--ink-soft); font-family: var(--font-kr);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: background 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
+}
+#view-apply .extra-toggle.is-on { background: var(--ink); color: #fff; border-color: var(--ink); }
+#view-apply textarea {
+  min-height: 88px; line-height: 1.5; resize: vertical;
+}
+#view-apply .form-sub { font-size: 14px; color: var(--label); margin: 0 0 24px; line-height: 1.5; }
+#view-apply .field { margin-bottom: 16px; }
+#view-apply .field > label { display: block; font-size: 14px; font-weight: 600; color: var(--ink-soft); margin-bottom: 8px; }
+#view-apply .req { color: var(--strike); font-weight: 700; }
+#view-apply .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+#view-apply .row--wide { grid-template-columns: 1.7fr 1fr; }
+#view-apply .field .hint { font-size: 12px; font-weight: 500; color: var(--label); margin-left: 4px; }
+#view-apply .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+#view-apply .chip { position: relative; display: block; }
+#view-apply .chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+#view-apply .chip span {
+  display: block; padding: 12px 4px; text-align: center; font-size: 15px; font-weight: 600;
+  color: var(--ink); background: #fff; border: 1.5px solid var(--line); border-radius: 10px;
+  transition: background 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
+}
+#view-apply .chip input:checked + span { background: var(--ink); color: #fff; border-color: var(--ink); }
+#view-apply input, #view-apply select, #view-apply textarea {
+  width: 100%; font-family: var(--font-kr); font-size: 16px; color: var(--ink); background: #fff;
+  border: 1.5px solid var(--line); border-radius: 12px; padding: 14px;
+  -webkit-appearance: none; appearance: none; transition: border-color 120ms var(--ease);
+}
+#view-apply input::placeholder, #view-apply textarea::placeholder { color: #b8b8bc; }
+#view-apply input:focus, #view-apply select:focus, #view-apply textarea:focus { outline: none; border-color: var(--ink); }
+#view-apply .consent {
+  display: flex; gap: 10px; align-items: flex-start; margin: 8px 0 22px;
+  font-size: 13px; color: var(--label); line-height: 1.55;
+}
+#view-apply .consent input {
+  -webkit-appearance: auto; appearance: auto; width: 20px; height: 20px; flex: none;
+  margin: 1px 0 0; padding: 0; border: 0; border-radius: 0; accent-color: var(--ink); cursor: pointer;
+}
+#view-apply .submit {
+  width: 100%; background: var(--ink); color: #fff; border: 0; border-radius: 16px; padding: 20px;
+  font-family: var(--font-kr); font-size: 21px; font-weight: 800; letter-spacing: -.5px;
+  cursor: pointer; transition: opacity 120ms var(--ease);
+}
+#view-apply .submit:hover { opacity: .85; }
+#view-apply .submit:disabled { opacity: .35; cursor: default; }
+
+#view-apply .done {
+  margin-top: 14px; background: var(--card); border-radius: 22px; padding: 48px 24px; text-align: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 12px 32px rgba(0,0,0,.06);
+}
+#view-apply .done .badge {
+  width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 50%; background: var(--ink);
+  display: grid; place-items: center;
+}
+#view-apply .done .badge svg { width: 34px; height: 34px; }
+#view-apply .done h2 { font-size: 24px; font-weight: 800; letter-spacing: -.6px; margin: 0 0 8px; }
+#view-apply .done p { font-size: 15px; color: var(--label); line-height: 1.6; margin: 0; }
+#view-apply .apply-head { display: flex; align-items: center; justify-content: space-between; }
+#view-apply .home-link {
+  margin: 0 -4px 8px 0; padding: 8px 12px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--label); font-family: var(--font-kr);
+  font-size: 15px; font-weight: 600; cursor: pointer; transition: opacity 120ms var(--ease);
+}
+#view-apply .home-link:hover { opacity: .65; }
+#view-apply .home-btn {
+  display: inline-block; margin-top: 24px; padding: 14px 30px;
+  border: 2px solid var(--ink); border-radius: 14px;
+  color: var(--ink); text-decoration: none; font-weight: 700; font-size: 16px;
+  transition: opacity 120ms var(--ease); cursor: pointer; background: transparent;
+  font-family: var(--font-kr);
+}
+#view-apply .home-btn:hover { opacity: .65; }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+
+<body>
+
+<div id="app">
+
+  <!-- ═══ 1. STORY ═══ (내용은 JS가 렌더) -->
+  <section class="view" id="view-story"></section>
+
+  <!-- ═══ 2. FIND ═══ -->
+  <section class="view" id="view-find">
+    <div class="wrap">
+      <button class="back" id="findBack" type="button" aria-label="이전 페이지">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true"><path d="M15 5l-7 7 7 7" stroke="#111" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+
+      <h1 class="headline">find your <span class="best">best</span> style</h1>
+
+      <div class="tabs">
+        <button class="tab active" data-g="women" type="button">여성</button>
+        <button class="tab" data-g="men" type="button">남성</button>
+      </div>
+
+      <div class="grid" id="findGrid"></div>
+    </div>
+
+    <div class="zoom" id="findZoom">
+      <button class="zoom-close" id="findZoomClose" type="button" aria-label="닫기">✕</button>
+      <div class="zoom-count" id="findZoomCount"></div>
+      <button class="pv-nav pv-prev" id="findPrev" type="button" aria-label="이전">‹</button>
+      <button class="pv-nav pv-next" id="findNext" type="button" aria-label="다음">›</button>
+      <div class="zoom-stage" id="findZoomStage"><div class="zoom-card" id="findZoomCard"><img id="findZoomImg" alt="확대 이미지"></div></div>
+      <div class="zoom-hint">좌우로 넘기기 · 더블탭/두 손가락 확대</div>
+    </div>
+  </section>
+
+  <!-- ═══ 3. COMPARE ═══ -->
+  <section class="view" id="view-compare">
+    <div class="cbox">
+      <div class="ccut"><img class="compare" id="compareImg" alt="추구미 vs 도달가능미"></div>
+    </div>
+
+    <button class="zone zone-prev" type="button" aria-label="이전"></button>
+    <button class="zone zone-center" type="button" aria-label="변우석 비교 보기"></button>
+    <button class="zone zone-next" type="button" aria-label="다음"></button>
+
+    <div class="pop" id="comparePop" aria-hidden="true">
+      <button class="pop-close" type="button" aria-label="닫기">✕</button>
+      <img class="pop-img" id="comparePopImg" alt="변우석 비교사진">
+    </div>
+  </section>
+
+  <!-- ═══ 4. MOOD ═══ -->
+  <section class="view" id="view-mood">
+    <div class="stack" id="moodStack"></div>
+  </section>
+
+  <!-- ═══ 5. EVENT ═══ -->
+  <section class="view" id="view-event">
+    <main class="page">
+      <button class="back" data-go="mood" type="button" aria-label="이전 페이지">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true"><path d="M15 5l-7 7 7 7" stroke="#141414" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <h1 class="headline">나의 무드를<br>완성해보세요</h1>
+
+      <section class="card">
+        <div class="hero">
+          <img id="eventImg1" alt="퍼스널컬러">
+          <img id="eventImg2" alt="골격진단">
+        </div>
+
+        <div class="panel">
+          <p class="eyebrow">NUA mood curation</p>
+
+          <ul class="list">
+            <li><span class="check"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" stroke="#141414" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>무드 리딩</li>
+            <li><span class="check"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" stroke="#141414" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>퍼스널컬러 or 골격진단</li>
+            <li><span class="check"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" stroke="#141414" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>스타일링 제안</li>
+            <li><span class="check"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" stroke="#141414" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>결과지 PDF 제공</li>
+          </ul>
+
+          <div class="divider"></div>
+
+          <div class="price">
+            <span class="label">정가</span>
+            <span class="original">150,000</span>
+            <span class="arrow">→</span>
+            <span class="free">FREE</span>
+          </div>
+        </div>
+      </section>
+
+      <button class="cta" type="button" id="applyBtn" data-go="apply">이벤트 신청하시겠어요?</button>
+    </main>
+  </section>
+
+  <!-- ═══ 6. APPLY ═══ (신청 폼 — 이벤트 화면의 신청 버튼으로 넘어옴) -->
+  <section class="view" id="view-apply">
+    <main class="page">
+      <div class="apply-head">
+        <button class="back" data-go="event" type="button" aria-label="이전 페이지">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true"><path d="M15 5l-7 7 7 7" stroke="#141414" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="home-link" data-home type="button">처음으로</button>
+      </div>
+
+      <section class="form-card" id="formCard">
+        <div class="form-head">
+          <h2>이벤트 신청</h2>
+          <button class="extra-toggle" id="extraBtn" type="button" aria-expanded="false" aria-controls="extraField" aria-label="기타 정보 입력">+</button>
+        </div>
+        <p class="form-sub">아래 정보를 남겨주시면 순서대로 연락드릴게요.</p>
+
+        <form id="applyForm" novalidate>
+          <div class="row row--wide">
+            <div class="field">
+              <label for="name">이름 <span class="req">*</span></label>
+              <input id="name" name="name" type="text" placeholder="이름" required autocomplete="name">
+            </div>
+            <div class="field">
+              <label for="age">나이</label>
+              <input id="age" name="age" type="number" inputmode="numeric" min="1" max="120" placeholder="나이">
+            </div>
+          </div>
+
+          <div class="row row--wide">
+            <div class="field">
+              <label for="phone">연락처 <span class="req">*</span></label>
+              <input id="phone" name="phone" type="tel" inputmode="tel" placeholder="010-0000-0000" required autocomplete="tel">
+            </div>
+            <div class="field">
+              <label for="region">지역 <span class="req">*</span></label>
+              <input id="region" name="region" type="text" placeholder="예) 강남역" required>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>희망 시간대 <span class="hint">(중복 선택 가능)</span></label>
+            <div class="chips" id="timeChips"></div>
+          </div>
+
+          <div class="field" id="extraField" hidden>
+            <label for="note">그 외</label>
+            <textarea id="note" name="note" rows="3" placeholder="예) 궁금한 점, 요청사항"></textarea>
+          </div>
+
+          <label class="consent">
+            <input type="checkbox" id="consent" name="consent" required>
+            <span>개인정보 수집·이용에 동의합니다. (필수)<br>
+            이벤트 예약 안내에만 사용하며, 종료 후 파기합니다.</span>
+          </label>
+
+          <button class="submit" type="submit" id="submitBtn" disabled>신청 완료하기</button>
+        </form>
+      </section>
+
+      <section class="done" id="doneCard" hidden>
+        <div class="badge">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h2>신청이 완료되었어요!</h2>
+        <p>남겨주신 연락처로 예약 안내를 드릴게요.<br>나의 무드, 곧 함께 완성해요.</p>
+        <button class="home-btn" data-home type="button">처음으로</button>
+      </section>
+    </main>
+  </section>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   설정 — 여기 값만 바꾸면 대부분 조정됩니다.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 이미지 위치.
+   '' 로 두면 이 HTML 파일과 같은 폴더의 pages/, find/img/ ... 를 씁니다.
+   file:// 로 그냥 열었을 때는 자동으로 배포 서버 이미지를 불러옵니다. */
+var REMOTE_BASE = 'https://nua-booth-story-an19.vercel.app/';
+var IMG_BASE = (location.protocol === 'file:') ? REMOTE_BASE : '';
+function img(p) { return IMG_BASE + p; }
+
+/* 구글 시트(Apps Script 웹앱) 주소. 비워두면 localStorage 에만 저장됩니다. */
+var SHEET_URL = 'https://script.google.com/macros/s/AKfycbynGazwXEpPCBiX27KrmvwFuWajUkcmcM4Dxrd_GZr5bfrr1dvbsebta-ZuHfbr0f-J/exec';
+
+/* 무입력 N밀리초 후 스토리 1페이지로 리셋 (스토리 화면에서만 동작) */
+var IDLE_RESET_MS = 60000;
+
+/* ── 스토리 페이지 데이터 (구 pages.json) ────────────────────── */
+var PAGES = [
+  {
+    src: 'pages/01-hooking.png',
+    label: '후킹 — 패션의 완성은 ___이다',
+    /* 아래 해시태그 두 줄을 왼쪽으로 30px (가운데 맞춤). 빈칸/정답 화면 모두에 적용 */
+    patch: { bg: '#f6f6f6', cover: [98, 706, 730, 170],
+             moves: [{ from: [98, 706, 730, 170], to: [68, 706] }] },
+    /* 정답을 보여줄 때 이미지 속 주황 '무드'를 덮고 'mood' 로 다시 그림
+       (좌표는 원본 PNG 864×1152 픽셀, text.y = 글자 기준선) */
+    reveal: { src: 'pages/01-hooking-answer.png', x: 5, y: 41, w: 58, h: 16,
+      patch: { bg: '#f6f6f6', cover: [180, 498, 230, 116],
+        text: { text: 'mood', x: 291, y: 598, size: 116, color: '#ff5400',
+                font: "'Bebas Neue', sans-serif", weight: 400, tracking: 8 } } },
+    hotspots: []
+  },
+  {
+    src: 'pages/go3-02-college.png',
+    label: '대학에 가면 꼭 해보고 싶은 것?',
+    reveal: null,
+    /* 종이 위 아이콘들이 랜덤하게 커졌다 작아졌다 (x,y,w 는 원본 1500×2000 대비 %) */
+    icons: [
+      { src: 'pages/icons/ic-love.png',     x: 13.53, y: 63.72, w: 7.13 },
+      { src: 'pages/icons/ic-shop.png',     x: 27.83, y: 63.62, w: 6.5  },
+      { src: 'pages/icons/ic-travel.png',   x: 40.87, y: 63.78, w: 12.87, dur: 1.7 },
+      { src: 'pages/icons/ic-parttime.png', x: 52.87, y: 63.72, w: 7.4  },
+      { src: 'pages/icons/ic-drink.png',    x: 65.17, y: 63.82, w: 7.33 }
+    ],
+    hotspots: []
+  },
+  {
+    src: 'pages/go3-03-worry.png',
+    label: '개강을 앞둔 새내기 고민 TOP 3',
+    reveal: null,
+    hotspots: []
+  }
+];
+
+/* ── 오버레이 팝업 이미지 (구 overlays.json) ────────────────────
+   crop: 원본(가로 imgW px) 중 보여줄 카드 영역 [x, y, w, h] — 빈 여백·그림자 제외
+   at:   팝업 세로 가운데 위치 = 누른 버튼 높이 (스토리 화면 높이 대비 %) */
+var OVERLAYS = {
+  reading: { src: 'overlays/reading.png', title: '무드 리딩', imgW: 1500, crop: [76, 59, 1347, 711], at: 25.2 },
+  styling: { src: 'overlays/styling.png', title: '퍼스널 컬러 / 골격진단', imgW: 1500, crop: [76, 1122, 1347, 746], at: 74.6 }
+};
+
+/* ── find 화면 코디 사진 ─────────────────────────────────────── */
+var PEOPLE = {
+  women: [
+    'find/img/women/1.png', 'find/img/women/2.png', 'find/img/women/3.png',
+    'find/img/women/4.png', 'find/img/women/5.png', 'find/img/women/6.png'
+  ],
+  men: [
+    'find/img/men/1-minimal.png', 'find/img/men/2-vintage.png', 'find/img/men/3-street.png',
+    'find/img/men/4-amekaji.png', 'find/img/men/5-casual.png', 'find/img/men/6-formal.png'
+  ]
+};
+
+/* find 칸 안 인물 크기·위치 맞춤 — 모든 칸을 3번째 칸(women/3)과 같은 전신 비율로.
+   FIND_FRAME: 칸 높이 대비 인물 머리 위치(top)와 머리~발끝 길이(height), %
+   PEOPLE_BOX: 사진 속 인물의 [머리 위 %, 발끝 %, 가로 가운데 %] (원본 이미지 기준)
+   사진을 바꾸면 여기 값도 바꿔야 함 (없으면 예전처럼 위쪽 맞춤으로 표시) */
+var FIND_FRAME = { top: 8.2, height: 84.4 };
+var PEOPLE_BOX = {
+  'find/img/women/1.png':       [1.7, 98.6, 52.2],
+  'find/img/women/2.png':       [6.9, 97.5, 49.6],   // 가로는 손에 든 재킷 빼고 몸 중심
+  'find/img/women/3.png':       [8.2, 92.6, 49.0],
+  'find/img/women/4.png':       [7.1, 94.4, 49.5],
+  'find/img/women/5.png':       [6.3, 95.1, 48.1],
+  'find/img/women/6.png':       [0.2, 99.8, 53.9],
+  'find/img/men/1-minimal.png': [6.0, 98.1, 65.2],
+  'find/img/men/2-vintage.png': [13.8, 94.9, 47.7],
+  'find/img/men/3-street.png':  [5.8, 99.9, 54.8],
+  'find/img/men/4-amekaji.png': [17.4, 92.9, 46.6],
+  'find/img/men/5-casual.png':  [12.9, 96.7, 52.4],
+  'find/img/men/6-formal.png':  [2.6, 98.5, 52.6]
+};
+/* 확대 뷰어 — 인물을 카드 정가운데, 남자 1번(1-minimal)과 같은 크기로 (여성도 같은 비율).
+   aspect: 카드 가로/세로, top·height: 카드 높이 대비 %. 성별별로 켬 (없으면 원본 그대로) */
+var ZOOM_FRAME = {
+  men:   { aspect: 735 / 1105, top: 3.95, height: 92.1 },
+  women: { aspect: 735 / 1105, top: 3.95, height: 92.1 }
+};
+/* find 화면 양쪽 끝 넘김 영역 (화면 폭 대비) — 이 안에서 사진을 탭하면 사진 대신 이전/다음 화면으로 */
+var FIND_EDGE = 0.08;
+
+/* ── 그 외 이미지 ────────────────────────────────────────────── */
+var IMAGES = {
+  compare: 'compare/img/compare.png',
+  byeon:   'compare/img/byeon.png',
+  event1:  'event/img/personal-color.jpg',
+  event2:  'event/img/body-type.jpg'
+};
+
+/* ── 무드 화면 구획 3개 ──────────────────────────────────────
+   crop: 원본 이미지(1500×2000)에서 잘라 보여줄 영역 [x, y, w, h] */
+var MOOD_CARDS = [
+  { src: 'mood/img/13.png', crop: [0, 40, 1500, 1925], alt: 'Mood Reading', step: '1' },
+  { src: 'mood/img/14.png', crop: [0, 622, 1500, 718], alt: 'Mood Styling', step: '2' }
+];
+
+/* ── 이벤트 신청 희망 시간대 ─────────────────────────────────── */
+var TIME_SLOTS = ['11:00','12:00','13:00','14:00','15:00','16:00',
+                  '17:00','18:00','19:00','20:00','21:00','22:00'];
+
+
+/* ═══════════════════════════════════════════════════════════════
+   라우팅 — #/story · #/find · #/compare · #/mood · #/event · #/apply
+   ═══════════════════════════════════════════════════════════════ */
+var VIEWS = ['story', 'mood', 'event', 'apply'];
+var currentView = 'story';
+
+function go(name) { location.hash = '#/' + name; }
+
+function applyRoute() {
+  var name = location.hash.replace(/^#\/?/, '');
+  if (VIEWS.indexOf(name) === -1) name = 'story';
+  var prevView = currentView;
+  currentView = name;
+  document.body.setAttribute('data-view', name);
+  VIEWS.forEach(function (v) {
+    document.getElementById('view-' + v).classList.toggle('is-active', v === name);
+  });
+  window.scrollTo(0, 0);
+  /* 신청 폼 비우기: 새 방문(신청 페이지가 아닌 곳에서 이벤트 화면으로) 또는 완료 후 다시 신청 */
+  if (window.resetApply && ((name === 'event' && prevView !== 'apply') ||
+      (name === 'apply' && window.applyDone()))) window.resetApply();
+  if (name === 'story') { kickIdle(); } else { stopIdle(); }
+}
+
+/* data-go="..." 버튼은 전부 라우팅. data-home 은 스토리 1페이지부터 다시 시작 */
+document.addEventListener('click', function (e) {
+  var t = e.target.closest ? e.target.closest('[data-go], [data-home]') : null;
+  if (!t) return;
+  e.preventDefault();
+  if (t.hasAttribute('data-home')) { store.reset(); go('story'); }
+  else go(t.getAttribute('data-go'));
+});
+window.addEventListener('hashchange', applyRoute);
+
+
+/* ═══════════════════════════════════════════════════════════════
+   STORY — store / stage / overlay sheet (구 src/*.js)
+   ═══════════════════════════════════════════════════════════════ */
+function createStore(pages) {
+  var state = { index: 0, pages: pages, overlay: null };
+  var listeners = [];
+  var onPastEnd = null;
+
+  function emit() { listeners.forEach(function (fn) { fn(state); }); }
+  function set(patch) { state = Object.assign({}, state, patch); emit(); }
+  function clamp(n) { return Math.max(0, Math.min(state.pages.length - 1, n)); }
+
+  return {
+    get: function () { return state; },
+    subscribe: function (fn) { listeners.push(fn); fn(state); },
+    setOnPastEnd: function (fn) { onPastEnd = fn; },
+    next: function () {
+      if (state.overlay) return;
+      if (state.index >= state.pages.length - 1) { if (onPastEnd) onPastEnd(); return; }
+      set({ index: state.index + 1 });
+    },
+    prev: function () { if (state.overlay) return; set({ index: clamp(state.index - 1) }); },
+    goTo: function (n) { set({ index: clamp(n) }); },
+    reset: function () { set({ index: 0, overlay: null }); },
+    openOverlay: function (id) { set({ overlay: id }); },
+    closeOverlay: function () { set({ overlay: null }); }
+  };
+}
+
+var store = createStore(PAGES);
+store.setOnPastEnd(function () { go('mood'); });
+
+(function buildStory() {
+  var root = document.getElementById('view-story');
+  var kiosk = isKioskMode();
+  document.body.classList.toggle('is-kiosk', kiosk);
+  document.body.classList.toggle('is-preview', !kiosk);
+
+  /* 프리뷰 헤더 */
+  if (!kiosk) {
+    var header = document.createElement('div');
+    header.className = 'preview-header';
+    header.innerHTML = '<span class="preview-header__title">NUA</span>';
+    root.appendChild(header);
+  }
+
+  /* 스테이지 */
+  var stageMount = document.createElement('div');
+  stageMount.className = 'stage-mount';
+  root.appendChild(stageMount);
+
+  var stage = document.createElement('div');
+  stage.className = 'stage';
+
+  var layerWrap = document.createElement('div');
+  layerWrap.className = 'layers';
+  /* 이미지 위 덮어 그리기 —
+     bg+cover: 덮을 색과 영역(없으면 전체), moves: 원본 영역 [x,y,w,h] 을 새 위치 [x,y] 로,
+     text: 새로 쓸 글자 (y 는 기준선). 좌표는 모두 원본 PNG 864×1152 픽셀 */
+  function patchSvg(t, url) {
+    var c = t.cover || [0, 0, 864, 1152], x = t.text;
+    return '<svg class="layer__patch" viewBox="0 0 864 1152" aria-hidden="true">' +
+      '<rect x="' + c[0] + '" y="' + c[1] + '" width="' + c[2] + '" height="' + c[3] + '" fill="' + t.bg + '"/>' +
+      (t.moves || []).map(function (m) {
+        var f = m.from;
+        return '<svg x="' + m.to[0] + '" y="' + m.to[1] + '" width="' + f[2] + '" height="' + f[3] +
+          '" viewBox="' + f.join(' ') + '"><image href="' + url + '" width="864" height="1152"/></svg>';
+      }).join('') +
+      (x ? '<text x="' + x.x + '" y="' + x.y + '" text-anchor="middle" font-family="' +
+        (x.font || "'Noto Sans KR', sans-serif") + '" font-weight="' + (x.weight || 700) +
+        '" font-style="' + (x.style || 'normal') + '" font-size="' + x.size +
+        '" letter-spacing="' + (x.tracking || 0) + '" fill="' + (x.color || '#000') + '">' + x.text + '</text>' : '') +
+      '</svg>';
+  }
+
+  var layers = PAGES.map(function (p) {
+    var layer = document.createElement('div');
+    layer.className = 'layer';
+    layer.style.backgroundImage = 'url("' + img(p.src) + '")';
+    layer.setAttribute('role', 'img');
+    layer.setAttribute('aria-label', p.label);
+    /* patch: 이미지 위에 덮어 그리기 (아래 patchSvg) */
+    if (p.patch) layer.innerHTML = patchSvg(p.patch, img(p.src));
+    /* icons: 종이 위 아이콘들이 랜덤 타이밍으로 커졌다 작아졌다 */
+    if (p.icons) {
+      var wrap = document.createElement('div');
+      wrap.className = 'ic-ani';
+      p.icons.forEach(function (ic) {
+        var el = document.createElement('img');
+        el.className = 'ic-ani__i';
+        el.src = img(ic.src); el.alt = '';
+        el.style.left = ic.x + '%'; el.style.top = ic.y + '%'; el.style.width = ic.w + '%';
+        var dur = (ic.dur != null ? ic.dur : (0.85 + Math.random() * 0.95)).toFixed(2);
+        var del = (Math.random() * 1.2).toFixed(2);
+        el.style.animation = 'icPop ' + dur + 's ease-in-out ' + del + 's infinite';
+        wrap.appendChild(el);
+      });
+      layer.appendChild(wrap);
+    }
+    layerWrap.appendChild(layer);
+    return layer;
+  });
+
+  var hotspotWrap = document.createElement('div');
+  hotspotWrap.className = 'hotspots';
+
+  var tapLeft = document.createElement('button');
+  tapLeft.className = 'tapzone tapzone--left';
+  tapLeft.type = 'button';
+  tapLeft.setAttribute('aria-label', '이전 페이지');
+  tapLeft.addEventListener('click', function () { store.prev(); });
+
+  var tapRight = document.createElement('button');
+  tapRight.className = 'tapzone tapzone--right';
+  tapRight.type = 'button';
+  tapRight.setAttribute('aria-label', '다음 페이지');
+  tapRight.addEventListener('click', function () { store.next(); });
+
+  stage.appendChild(layerWrap);
+  stage.appendChild(hotspotWrap);
+  stage.appendChild(tapLeft);
+  stage.appendChild(tapRight);
+  stageMount.appendChild(stage);
+
+  function renderHotspots(index) {
+    hotspotWrap.replaceChildren();
+    var page = PAGES[index];
+
+    /* reveal: 빈칸 탭 → 정답 이미지 토글 */
+    if (page.reveal) {
+      var orig = img(page.src);
+      var answer = img(page.reveal.src);
+      new Image().src = answer;
+      /* 페이지 공통 patch + (정답일 때) 정답 patch 를 함께 그림 */
+      var paint = function (on) {
+        var url = on ? answer : orig;
+        layers[index].style.backgroundImage = 'url("' + url + '")';
+        layers[index].innerHTML = (page.patch ? patchSvg(page.patch, url) : '') +
+          (on && page.reveal.patch ? patchSvg(page.reveal.patch, url) : '');
+      };
+      paint(false);
+      var shown = false;
+      var rb = document.createElement('button');
+      rb.type = 'button';
+      rb.className = 'hotspot';
+      rb.setAttribute('aria-label', '정답 보기');
+      rb.style.left = page.reveal.x + '%';
+      rb.style.top = page.reveal.y + '%';
+      rb.style.width = page.reveal.w + '%';
+      rb.style.height = page.reveal.h + '%';
+      rb.addEventListener('click', function () {
+        shown = !shown;
+        paint(shown);
+      });
+      hotspotWrap.appendChild(rb);
+    }
+
+    (page.hotspots || []).forEach(function (h) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'hotspot';
+      btn.setAttribute('aria-label', h.id);
+      btn.style.left = h.x + '%';
+      btn.style.top = h.y + '%';
+      btn.style.width = h.w + '%';
+      btn.style.height = h.h + '%';
+      btn.addEventListener('click', function () {
+        if (typeof h.action === 'string' && h.action.indexOf('openOverlay:') === 0) {
+          store.openOverlay(h.action.slice('openOverlay:'.length));
+        }
+      });
+      hotspotWrap.appendChild(btn);
+    });
+  }
+
+  store.subscribe(function (state) {
+    layers.forEach(function (l, i) { l.style.opacity = (i === state.index) ? '1' : '0'; });
+    renderHotspots(state.index);
+    var locked = !!state.overlay;
+    tapLeft.disabled = locked;
+    tapRight.disabled = locked;
+  });
+
+  /* 오버레이 팝업 — 변우석 사진처럼 어두운 배경 위 카드. 사진은 카드 부분(crop)만 보이고,
+     세로 위치는 누른 버튼 높이(at)에 맞춤. 아무 데나 누르면 닫힘 */
+  var ov = document.createElement('div');
+  ov.className = 'ovpop';
+  ov.hidden = true;
+  ov.setAttribute('role', 'dialog');
+  ov.setAttribute('aria-modal', 'true');
+  ov.innerHTML =
+    '<button class="ovpop__close" type="button" aria-label="닫기">✕</button>' +
+    '<div class="ovpop__card"><img class="ovpop__img" alt=""></div>';
+  root.appendChild(ov);
+
+  var ovCard = ov.querySelector('.ovpop__card');
+  var ovImg = ov.querySelector('.ovpop__img');
+  ov.addEventListener('click', function () { store.closeOverlay(); });
+
+  /* 카드: 스토리 화면(stage) 폭의 94%, 세로 가운데 = 버튼 높이.
+     이미지는 crop 영역이 카드에 꼭 맞게 확대·이동 (모서리 반경은 원본 카드 모서리보다 조금 크게) */
+  function placeCard(o) {
+    var s = stage.getBoundingClientRect(), c = o.crop;
+    var w = Math.min(s.width, window.innerWidth) * 0.94;
+    var k = w / c[2], h = c[3] * k;
+    var top = s.top + s.height * o.at / 100 - h / 2;
+    top = Math.max(12, Math.min(window.innerHeight - h - 12, top));
+    ovCard.style.cssText = 'width:' + w + 'px;height:' + h + 'px;left:' + (s.left + s.width / 2 - w / 2) +
+      'px;top:' + top + 'px;border-radius:' + Math.max(12, 36 * k) + 'px';
+    ovImg.style.cssText = 'width:' + o.imgW * k + 'px;margin-left:' + (-c[0] * k) + 'px;margin-top:' + (-c[1] * k) + 'px';
+  }
+
+  var currentOverlay = null;
+  store.subscribe(function (state) {
+    var id = state.overlay;
+    if (id === currentOverlay) return;
+    currentOverlay = id;
+    if (id && OVERLAYS[id]) {
+      var o = OVERLAYS[id];
+      ovImg.src = img(o.src);
+      ovImg.alt = o.title || id;
+      ov.setAttribute('aria-label', o.title || id);
+      ov.hidden = false;
+      placeCard(o);
+      ov.classList.remove('is-open');
+      void ov.offsetWidth;   // 열 때마다 튀어나오는 애니메이션 다시 시작
+      ov.classList.add('is-open');
+    } else {
+      ov.hidden = true;
+      ov.classList.remove('is-open');
+    }
+  });
+  window.addEventListener('resize', function () {
+    if (currentOverlay && OVERLAYS[currentOverlay]) placeCard(OVERLAYS[currentOverlay]);
+  });
+})();
+
+/* 프리뷰 vs 키오스크 모드 (?mode=kiosk / PWA standalone) */
+function isKioskMode() {
+  var q = new URLSearchParams(location.search);
+  if (q.get('mode') === 'kiosk') return true;
+  if (q.get('mode') === 'preview') return false;
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   FIND — 코디 그리드 + 확대 뷰어
+   ═══════════════════════════════════════════════════════════════ */
+(function buildFind() {
+  var viewEl = document.getElementById('view-find');
+  var gridEl = document.getElementById('findGrid');
+  var overlay = document.getElementById('findZoom');
+  var stageEl = document.getElementById('findZoomStage');
+  var imgEl = document.getElementById('findZoomImg');
+  var cardEl = document.getElementById('findZoomCard');
+  var countEl = document.getElementById('findZoomCount');
+
+  var scale = 1, tx = 0, ty = 0, minS = 1, maxS = 5, start = null, list = [], idx = 0, listG = '';
+  var cur = 'women';
+
+  function apply() {
+    cardEl.style.transform = 'translate(-50%,-50%) translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+  }
+  /* 카드 크기: ZOOM_FRAME 사진은 고정 비율 카드, 아니면 사진 원본 비율 */
+  function fit() {
+    var f = imgEl.classList.contains('framed') ? ZOOM_FRAME[listG] : null;
+    var w = f ? f.aspect : imgEl.naturalWidth, h = f ? 1 : imgEl.naturalHeight;
+    var r = Math.min(window.innerWidth / w, (window.innerHeight - 40) / h) * 0.92;
+    cardEl.style.width = (w * r) + 'px';
+    cardEl.style.height = (h * r) + 'px';
+    scale = 1; tx = 0; ty = 0; apply();
+  }
+  function show() {
+    var css = frameCss(list[idx], ZOOM_FRAME[listG]);
+    imgEl.className = css ? 'framed' : '';
+    imgEl.style.cssText = css;
+    imgEl.src = img(list[idx]);
+    countEl.textContent = (idx + 1) + ' / ' + list.length;
+    imgEl.onload = fit;
+    if (imgEl.complete && imgEl.naturalWidth) fit();
+  }
+  function openPerson(g, i) { list = PEOPLE[g]; listG = g; idx = i; overlay.classList.add('show'); show(); }
+  function pvStep(d) { idx = (idx + d + list.length) % list.length; show(); }
+  function closeZoom() { overlay.classList.remove('show'); }
+  function zoomOpen() { return overlay.classList.contains('show'); }
+
+  document.getElementById('findZoomClose').addEventListener('click', closeZoom);
+  document.getElementById('findPrev').addEventListener('click', function () { pvStep(-1); });
+  document.getElementById('findNext').addEventListener('click', function () { pvStep(1); });
+
+  function dist(t) { return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY); }
+
+  stageEl.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 2) { start = { d: dist(e.touches), s: scale }; }
+    else if (e.touches.length === 1) {
+      start = { x: e.touches[0].clientX, y: e.touches[0].clientY, tx: tx, ty: ty, single: true, t: Date.now() };
+    }
+  }, { passive: false });
+
+  stageEl.addEventListener('touchmove', function (e) {
+    if (!start) return;
+    if (e.touches.length === 2 && start.d) {
+      e.preventDefault();
+      scale = Math.min(maxS, Math.max(minS, start.s * (dist(e.touches) / start.d)));
+      apply();
+    } else if (e.touches.length === 1 && start.single && scale > 1) {
+      e.preventDefault();
+      tx = start.tx + (e.touches[0].clientX - start.x);
+      ty = start.ty + (e.touches[0].clientY - start.y);
+      apply();
+    }
+  }, { passive: false });
+
+  stageEl.addEventListener('touchend', function (e) {
+    if (start && start.single && scale <= 1.02) {
+      var dx = e.changedTouches[0].clientX - start.x, dt = Date.now() - start.t;
+      if (Math.abs(dx) > 50 && dt < 500) { pvStep(dx < 0 ? 1 : -1); start = null; return; }
+    }
+    if (scale <= 1.02) { tx = 0; ty = 0; scale = 1; apply(); }
+    start = null;
+  });
+
+  var lastTap = 0;
+  stageEl.addEventListener('touchend', function () {
+    var now = Date.now();
+    if (now - lastTap < 300) { scale = scale > 1 ? 1 : 2.4; if (scale === 1) { tx = 0; ty = 0; } apply(); }
+    lastTap = now;
+  });
+
+  overlay.addEventListener('click', function (e) {
+    if (e.target === overlay || e.target === stageEl) closeZoom();
+  });
+  stageEl.addEventListener('dblclick', function () {
+    scale = scale > 1 ? 1 : 2.4; if (scale === 1) { tx = 0; ty = 0; } apply();
+  });
+  stageEl.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    scale = Math.min(maxS, Math.max(minS, scale - e.deltaY * 0.002));
+    if (scale <= 1) { tx = 0; ty = 0; }
+    apply();
+  }, { passive: false });
+
+  /* 인물 머리~발끝이 틀(f)의 top ~ top+height 위치, 가로 가운데에 오도록 크기·위치 계산.
+     % 는 틀 높이 기준 — 그리드 칸(FIND_FRAME)과 확대 카드(ZOOM_FRAME)에 같이 씀 */
+  function frameCss(src, f) {
+    var b = PEOPLE_BOX[src];
+    if (!b || !f) return '';
+    var h = f.height / (b[1] - b[0]) * 100;   // 이미지 높이 (틀 높이 대비 %)
+    var top = f.top - b[0] * h / 100;         // 이미지 위쪽 위치 (틀 높이 대비 %)
+    return 'height:' + h.toFixed(2) + '%;top:' + top.toFixed(2) + '%;transform:translateX(-' + b[2] + '%)';
+  }
+
+  /* 그리드 */
+  function renderGrid() {
+    gridEl.innerHTML = '';
+    PEOPLE[cur].forEach(function (src, i) {
+      var c = document.createElement('div');
+      c.className = 'cell';
+      var css = frameCss(src, FIND_FRAME);
+      c.innerHTML = '<img src="' + img(src) + '" alt="스타일 ' + (i + 1) + '"' +
+        (css ? ' class="framed" style="' + css + '"' : '') + '>';
+      /* 양쪽 끝(FIND_EDGE) 안을 탭하면 사진 대신 이전/다음 화면으로 */
+      c.addEventListener('click', function (e) {
+        var x = e.clientX / window.innerWidth;
+        if (x < FIND_EDGE) goPrev();
+        else if (x > 1 - FIND_EDGE) go('compare');
+        else openPerson(cur, i);
+      });
+      gridEl.appendChild(c);
+    });
+  }
+  viewEl.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      cur = t.dataset.g;
+      viewEl.querySelectorAll('.tab').forEach(function (x) {
+        x.classList.toggle('active', x.dataset.g === cur);
+      });
+      renderGrid();
+    });
+  });
+  renderGrid();
+
+  /* 이전 = 스토리 마지막 장 (바로 전 페이지), 다음 = compare */
+  function goPrev() { store.goTo(PAGES.length - 1); go('story'); }
+  document.getElementById('findBack').addEventListener('click', goPrev);
+
+  /* 사진 없는 곳 탭으로 넘기기 (좌 26% 이전 / 우 74% 다음) */
+  viewEl.addEventListener('click', function (e) {
+    if (zoomOpen()) return;
+    if (e.target.closest('.cell, .tab, .back, .zoom')) return;
+    if (e.clientX < window.innerWidth * 0.26) goPrev(); else go('compare');
+  });
+
+  window.findZoomOpen = zoomOpen;
+  window.findPvStep = pvStep;
+  window.findCloseZoom = closeZoom;
+  window.findGoPrev = goPrev;
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPARE — 3:4 이미지 + 가운데 팝업
+   ═══════════════════════════════════════════════════════════════ */
+(function buildCompare() {
+  var viewEl = document.getElementById('view-compare');
+  document.getElementById('compareImg').src = img(IMAGES.compare);
+  document.getElementById('comparePopImg').src = img(IMAGES.byeon);
+
+  var pop = document.getElementById('comparePop');
+  viewEl.querySelector('.zone-prev').addEventListener('click', function () { go('find'); });
+  viewEl.querySelector('.zone-next').addEventListener('click', function () { go('mood'); });
+  viewEl.querySelector('.zone-center').addEventListener('click', function () { pop.classList.add('show'); });
+  pop.addEventListener('click', function () { pop.classList.remove('show'); });
+
+  window.comparePopOpen = function () { return pop.classList.contains('show'); };
+  window.compareClosePop = function () { pop.classList.remove('show'); };
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   MOOD — 이미지 2장 세로 스택, 좌 25% 이전 / 우 25% 다음
+   ═══════════════════════════════════════════════════════════════ */
+(function buildMood() {
+  /* 구획마다 카드 하나 — 이미지를 위로 끌어올려(margin-top) 필요한 부분만 보이게 함 */
+  document.getElementById('moodStack').innerHTML = MOOD_CARDS.map(function (c) {
+    var k = c.crop;
+    return '<div class="mcard">' +
+      (c.step ? '<div class="mhead">STEP ' + c.step + '<i></i></div>' : '') +
+      '<div class="mcrop" style="aspect-ratio:' + k[2] + ' / ' + k[3] + '">' +
+        '<img src="' + img(c.src) + '" alt="' + c.alt + '" style="margin-top:' +
+        (-k[1] / k[2] * 100).toFixed(3) + '%">' +
+      '</div></div>';
+  }).join('');
+
+  document.getElementById('view-mood').addEventListener('click', function (e) {
+    var x = e.clientX / window.innerWidth;
+    if (x < 0.25) go('story');
+    else if (x > 0.75) go('event');
+    /* 가운데는 그냥 읽기 */
+  });
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   EVENT — 신청 폼 + 구글 시트 전송
+   ═══════════════════════════════════════════════════════════════ */
+/* 연락처를 010-0000-0000 형태로 — 숫자만 보내면 시트가 숫자로 바꿔 앞자리 0을 지움 */
+function formatPhone(v) {
+  var d = String(v || '').replace(/\D/g, '');
+  var m = /^02/.test(d) ? d.match(/^(02)(\d{3,4})(\d{4})$/) : d.match(/^(\d{3})(\d{3,4})(\d{4})$/);
+  return m ? m[1] + '-' + m[2] + '-' + m[3] : String(v || '').trim();
+}
+
+function submitApplication(payload) {
+  var STORE_KEY = 'nua.applications.v1';
+  var record = Object.assign(
+    { id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())), at: new Date().toISOString() },
+    payload
+  );
+
+  /* 1) 로컬 백업 */
+  try {
+    var prev = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+    prev.push(record);
+    localStorage.setItem(STORE_KEY, JSON.stringify(prev));
+  } catch (e) { /* 저장 실패해도 전송은 시도 */ }
+
+  /* 2) 구글 시트 전송 (no-cors) */
+  if (SHEET_URL) {
+    try {
+      fetch(SHEET_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(record)
+      });
+    } catch (e) { /* 실패해도 로컬엔 남음 */ }
+  }
+
+  return Promise.resolve({ ok: true, id: record.id });
+}
+
+(function buildEvent() {
+  document.getElementById('eventImg1').src = img(IMAGES.event1);
+  document.getElementById('eventImg2').src = img(IMAGES.event2);
+
+  /* 시간대 칩 */
+  var chips = document.getElementById('timeChips');
+  TIME_SLOTS.forEach(function (t) {
+    var label = document.createElement('label');
+    label.className = 'chip';
+    label.innerHTML = '<input type="checkbox" name="time" value="' + t + '"><span>' + t + '</span>';
+    chips.appendChild(label);
+  });
+
+  /* 이벤트 화면의 신청 버튼(data-go="apply")을 누르면 신청 폼 페이지(#/apply)로 넘어감 */
+  var formCard = document.getElementById('formCard');
+  var form = document.getElementById('applyForm');
+  var consent = document.getElementById('consent');
+  var submitBtn = document.getElementById('submitBtn');
+  var doneCard = document.getElementById('doneCard');
+
+  consent.addEventListener('change', function () { submitBtn.disabled = !consent.checked; });
+
+  /* "+ 기타 정보" — 누르면 자유 입력칸이 열리고 다시 누르면 닫힘 */
+  var extraBtn = document.getElementById('extraBtn');
+  var extraField = document.getElementById('extraField');
+  function showExtra(on) {
+    extraField.hidden = !on;
+    extraBtn.classList.toggle('is-on', on);
+    extraBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (on) requestAnimationFrame(function () { document.getElementById('note').focus(); });
+  }
+  extraBtn.addEventListener('click', function () { showExtra(extraField.hidden); });
+
+  /* 신청 폼 처음 상태로 — 입력 비우기, 완료 카드 닫기 (호출은 applyRoute)
+     키오스크에서 다음 사람이 이전 사람의 입력이나 완료 화면을 보지 않도록 */
+  window.resetApply = function () {
+    form.reset();
+    showExtra(false);
+    submitBtn.disabled = true;
+    submitBtn.textContent = '신청 완료하기';
+    formCard.hidden = false;
+    doneCard.hidden = true;
+  };
+  window.applyDone = function () { return !doneCard.hidden; };
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!form.checkValidity()) { form.reportValidity(); return; }
+
+    var fd = new FormData(form);
+    var payload = Object.fromEntries(fd.entries());
+    payload.time = fd.getAll('time');
+    payload.phone = formatPhone(payload.phone);
+    submitBtn.disabled = true;
+    submitBtn.textContent = '신청 중…';
+
+    submitApplication(payload).then(function (res) {
+      if (res.ok) {
+        formCard.hidden = true;
+        doneCard.hidden = false;
+        window.scrollTo(0, 0);
+      } else {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '신청 완료하기';
+        alert('전송에 실패했어요. 잠시 후 다시 시도해주세요.');
+      }
+    });
+  });
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   키오스크 운영 — 키보드 넘김 · 무입력 리셋 · 화면 꺼짐 방지 · 입력 하드닝
+   ═══════════════════════════════════════════════════════════════ */
+
+/* 키보드 (운영자 리모컨) */
+window.addEventListener('keydown', function (e) {
+  if (currentView === 'story') {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); store.next(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); store.prev(); }
+    else if (e.key === 'Escape') { store.closeOverlay(); }
+  } else if (currentView === 'find') {
+    if (window.findZoomOpen()) {
+      if (e.key === 'ArrowLeft') window.findPvStep(-1);
+      else if (e.key === 'ArrowRight') window.findPvStep(1);
+      else if (e.key === 'Escape') window.findCloseZoom();
+      return;
+    }
+    if (e.key === 'ArrowRight' || e.key === ' ') go('compare');
+    else if (e.key === 'ArrowLeft') window.findGoPrev();
+  } else if (currentView === 'compare') {
+    if (e.key === 'Escape') { window.compareClosePop(); return; }
+    if (window.comparePopOpen()) return;
+    if (e.key === 'ArrowRight' || e.key === ' ') go('mood');
+    else if (e.key === 'ArrowLeft') go('find');
+  } else if (currentView === 'mood') {
+    if (e.key === 'ArrowRight') go('event');
+    else if (e.key === 'ArrowLeft') go('story');
+  }
+});
+
+/* 무입력 리셋 (스토리 화면에서만 — 신청 폼 작성 중 끊기지 않도록) */
+var idleTimer = 0;
+function kickIdle() {
+  clearTimeout(idleTimer);
+  if (currentView !== 'story') return;
+  idleTimer = setTimeout(function () { store.reset(); }, IDLE_RESET_MS);
+}
+function stopIdle() { clearTimeout(idleTimer); }
+['pointerdown', 'keydown', 'touchstart'].forEach(function (ev) {
+  window.addEventListener(ev, kickIdle, { passive: true });
+});
+
+/* 화면 꺼짐 방지 */
+(function installWakeLock() {
+  var lock = null;
+  function request() {
+    try {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+        navigator.wakeLock.request('screen').then(function (l) { lock = l; }).catch(function () {});
+      }
+    } catch (e) { /* 미지원 — 무시 */ }
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') request();
+  });
+  request();
+})();
+
+/* 확대·컨텍스트 메뉴·제스처 차단 (이벤트·신청 폼 화면은 제외) */
+function isFormView() { return currentView === 'event' || currentView === 'apply'; }
+window.addEventListener('contextmenu', function (e) {
+  if (!isFormView()) e.preventDefault();
+});
+['gesturestart', 'gesturechange', 'gestureend'].forEach(function (ev) {
+  document.addEventListener(ev, function (e) {
+    if (!isFormView()) e.preventDefault();
+  });
+});
+var lastTouchEnd = 0;
+document.addEventListener('touchend', function (e) {
+  if (isFormView()) return;
+  var now = Date.now();
+  if (now - lastTouchEnd <= 300) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+
+
+/* ── 부팅 ────────────────────────────────────────────────────── */
+applyRoute();
+</script>
+</body>
+</html>
