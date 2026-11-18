@@ -1055,13 +1055,12 @@ store.setOnPastEnd(function () { go('mood'); });
   });
 })();
 
-/* 프리뷰 vs 키오스크 모드 (?mode=kiosk / PWA standalone) */
+/* 프리뷰 vs 키오스크 모드 (?mode=preview 면 작은 카드, 기본은 전체화면 키오스크) */
 function isKioskMode() {
   var q = new URLSearchParams(location.search);
   if (q.get('mode') === 'kiosk') return true;
   if (q.get('mode') === 'preview') return false;
-  return window.matchMedia('(display-mode: standalone)').matches
-    || window.navigator.standalone === true;
+  return true;   // 기본값: 전체화면(키오스크) — 주소만 열어도 꽉 차게
 }
 
 
